@@ -44,6 +44,7 @@ bool UpdateALDevice()
 }
 ALCcontext *alcCreateContextHook(ALCdevice* device, const ALCint* attributes)
 {
+    if(pSoundDevice != nullptr) logger->Error("alcCreateContext created once more and with a different ALC Device?");
     pSoundDevice = device;
     const ALCint attr[] = {
         ALC_FREQUENCY, pCfg44100Frequency->GetBool()?44100:22050,
@@ -66,7 +67,38 @@ void HRTFToggled(int oldVal, int newVal)
     cfg->Save();
 }
 
-int ZeroReturn() { return 0; }
+int ZeroReturn(void* args, ...) { return 0; }
+
+bool bPaused = false;
+void PauseOpenSLES(int probably_alc_device)
+{
+    if(!bPaused)
+    {
+        alcDevicePauseSOFT(pSoundDevice);
+        bPaused = true;
+    }
+}
+
+void ResumeOpenSLES()
+{
+    if(bPaused)
+    {
+        alcDeviceResumeSOFT(pSoundDevice);
+        bPaused = false;
+    }
+}
+
+DECL_HOOK(char*, StartUserPause, void* self)
+{
+    ResumeOpenSLES();
+    return StartUserPause(self);
+}
+
+DECL_HOOK(char*, EndUserPause, void* self)
+{
+    ResumeOpenSLES();
+    return EndUserPause(self);
+}
 
 extern "C" void OnModLoad()
 {
@@ -89,7 +121,7 @@ extern "C" void OnModLoad()
     aml->Hook(dlsym(pGTASA, "alBufferf"), (void*)alBufferf);
     aml->Hook(dlsym(pGTASA, "alBufferfv"), (void*)alBufferfv);
     aml->Hook(dlsym(pGTASA, "alBufferi"), (void*)alBufferi);
-    aml->Hook(dlsym(pGTASA, "alBufferiv"), (void*)alBufferiv); // crash?
+    //aml->Hook(dlsym(pGTASA, "alBufferiv"), (void*)alBufferiv); // crash? SEGV_ACCERR, not used anyway so i dont care...
     aml->Hook(dlsym(pGTASA, "alDeferUpdatesSOFT"), (void*)alDeferUpdatesSOFT);
     aml->Hook(dlsym(pGTASA, "alDeleteAuxiliaryEffectSlots"), (void*)alDeleteAuxiliaryEffectSlots);
     aml->Hook(dlsym(pGTASA, "alDeleteBuffers"), (void*)alDeleteBuffers);
@@ -228,8 +260,9 @@ extern "C" void OnModLoad()
 
     // Something by WarDrum
     aml->Hook(dlsym(pGTASA, "alSetConfigMOB"), (void*)ZeroReturn);
-
-    //aml->PlaceJMP(pGTASAAddr + 0x248190, (uintptr_t)ZeroReturn);
+    aml->Hook(dlsym(pGTASA, "PauseOpenSLES"), (void*)PauseOpenSLES);
+    HOOK(StartUserPause, dlsym(pGTASA, "_ZN6CTimer14StartUserPauseEv"));
+    HOOK(EndUserPause, dlsym(pGTASA, "_ZN6CTimer12EndUserPauseEv"));
 
     sautils = (ISAUtils*)GetInterface("SAUtils");
     if(sautils != nullptr)
