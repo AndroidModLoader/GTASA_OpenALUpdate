@@ -524,6 +524,11 @@ constexpr struct {
 
     DECL(ALC_OUTPUT_LIMITER_SOFT),
 
+    DECL(ALC_OUTPUT_MODE_SOFT),
+    DECL(ALC_NORMAL_SOFT),
+    DECL(ALC_STEREO_UHJ_SOFT),
+    DECL(ALC_ANY_SOFT),
+
     DECL(ALC_NO_ERROR),
     DECL(ALC_INVALID_DEVICE),
     DECL(ALC_INVALID_CONTEXT),
@@ -933,6 +938,7 @@ constexpr ALCchar alcExtensionList[] =
     "ALC_SOFT_loopback "
     "ALC_SOFT_loopback_bformat "
     "ALC_SOFT_output_limiter "
+    "ALC_SOFTX_output_mode "
     "ALC_SOFT_pause_device "
     "ALC_SOFTX_reopen_device";
 constexpr int alcMajorVersion{1};
@@ -1520,19 +1526,15 @@ static inline void UpdateClockBase(ALCdevice *device)
  */
 ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
 {
-    ALCenum gainLimiter{device->LimiterState};
-    uint new_sends{device->NumAuxSends};
-    al::optional<bool> hrtfreq{};
-    DevFmtChannels oldChans;
-    DevFmtType oldType;
-    int hrtf_id{-1};
-    uint oldFreq;
-
     if((!attrList || !attrList[0]) && device->Type == DeviceType::Loopback)
     {
         WARN("Missing attributes for loopback device\n");
         return ALC_INVALID_VALUE;
     }
+
+    al::optional<StereoEncoding> stereomode{};
+    al::optional<bool> optlimit{};
+    int hrtf_id{-1};
 
     // Check for attributes
     if(attrList && attrList[0])
@@ -1545,6 +1547,7 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
         al::optional<DevFmtType> opttype;
         al::optional<DevAmbiLayout> optlayout;
         al::optional<DevAmbiScaling> optscale;
+        al::optional<bool> opthrtf;
 
         uint aorder{0u};
         uint freq{0u};
@@ -1607,11 +1610,11 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
             case ALC_HRTF_SOFT:
                 TRACE_ATTR(ALC_HRTF_SOFT, attrList[attrIdx + 1]);
                 if(attrList[attrIdx + 1] == ALC_FALSE)
-                    hrtfreq = al::make_optional(false);
+                    opthrtf = false;
                 else if(attrList[attrIdx + 1] == ALC_TRUE)
-                    hrtfreq = al::make_optional(true);
-                else
-                    hrtfreq = al::nullopt;
+                    opthrtf = true;
+                else if(attrList[attrIdx + 1] == ALC_DONT_CARE_SOFT)
+                    opthrtf = al::nullopt;
                 break;
 
             case ALC_HRTF_ID_SOFT:
@@ -1620,8 +1623,25 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
                 break;
 
             case ALC_OUTPUT_LIMITER_SOFT:
-                gainLimiter = attrList[attrIdx + 1];
-                TRACE_ATTR(ALC_OUTPUT_LIMITER_SOFT, gainLimiter);
+                TRACE_ATTR(ALC_OUTPUT_LIMITER_SOFT, attrList[attrIdx + 1]);
+                if(attrList[attrIdx + 1] == ALC_FALSE)
+                    optlimit = false;
+                else if(attrList[attrIdx + 1] == ALC_TRUE)
+                    optlimit = true;
+                else if(attrList[attrIdx + 1] == ALC_DONT_CARE_SOFT)
+                    optlimit = al::nullopt;
+                break;
+
+            case ALC_OUTPUT_MODE_SOFT:
+                TRACE_ATTR(ALC_HRTF_SOFT, attrList[attrIdx + 1]);
+                if(attrList[attrIdx + 1] == ALC_HRTF_SOFT)
+                    stereomode = StereoEncoding::Hrtf;
+                else if(attrList[attrIdx + 1] == ALC_STEREO_UHJ_SOFT)
+                    stereomode = StereoEncoding::Uhj;
+                else if(attrList[attrIdx + 1] == ALC_NORMAL_SOFT)
+                    stereomode = StereoEncoding::Normal;
+                else if(attrList[attrIdx + 1] == ALC_ANY_SOFT)
+                    stereomode = al::nullopt;
                 break;
 
             default:
@@ -1661,6 +1681,9 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
         device->Flags.reset(DeviceRunning);
 
         UpdateClockBase(device);
+
+        if(!stereomode && opthrtf)
+            stereomode = *opthrtf ? StereoEncoding::Hrtf : StereoEncoding::Normal;
 
         if(loopback)
         {
@@ -1722,9 +1745,10 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
         device->NumStereoSources = numStereo;
 
         if(auto sendsopt = device->configValue<int>(nullptr, "sends"))
-            new_sends = minu(numSends, static_cast<uint>(clampi(*sendsopt, 0, MAX_SENDS)));
+            device->NumAuxSends = minu(numSends,
+                static_cast<uint>(clampi(*sendsopt, 0, MAX_SENDS)));
         else
-            new_sends = numSends;
+            device->NumAuxSends = numSends;
     }
 
     if(device->Flags.test(DeviceRunning))
@@ -1757,7 +1781,7 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
     device->DitherSeed = DitherRNGSeed;
 
     /*************************************************************************
-     * Update device format request if HRTF is requested
+     * Update device format request if HRTF or UHJ is requested
      */
     device->mHrtfStatus = ALC_HRTF_DISABLED_SOFT;
     if(device->Type != DeviceType::Loopback)
@@ -1766,24 +1790,23 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
         {
             const char *hrtf{hrtfopt->c_str()};
             if(al::strcasecmp(hrtf, "true") == 0)
-                hrtfreq = al::make_optional(true);
+                stereomode = StereoEncoding::Hrtf;
             else if(al::strcasecmp(hrtf, "false") == 0)
-                hrtfreq = al::make_optional(false);
+            {
+                if(!stereomode || *stereomode == StereoEncoding::Hrtf)
+                    stereomode = StereoEncoding::Normal;
+            }
             else if(al::strcasecmp(hrtf, "auto") != 0)
                 ERR("Unexpected hrtf value: %s\n", hrtf);
         }
 
-        /* If the app or user wants HRTF, try to set stereo playback. */
-        if(hrtfreq && hrtfreq.value())
+        /* If the app or user wants HRTF or UHJ, try to set stereo playback. */
+        if(stereomode && *stereomode != StereoEncoding::Normal)
         {
             device->FmtChans = DevFmtStereo;
             device->Flags.set(ChannelsRequest);
         }
     }
-
-    oldFreq  = device->Frequency;
-    oldChans = device->FmtChans;
-    oldType  = device->FmtType;
 
     TRACE("Pre-reset: %s%s, %s%s, %s%uhz, %u / %u buffer\n",
         device->Flags.test(ChannelsRequest)?"*":"", DevFmtChannelsString(device->FmtChans),
@@ -1791,6 +1814,9 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
         device->Flags.test(FrequencyRequest)?"*":"", device->Frequency,
         device->UpdateSize, device->BufferSize);
 
+    const uint oldFreq{device->Frequency};
+    const DevFmtChannels oldChans{device->FmtChans};
+    const DevFmtType oldType{device->FmtType};
     try {
         auto backend = device->Backend.get();
         if(!backend->reset())
@@ -1835,9 +1861,35 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
     case DevFmtAmbi3D: break;
     }
 
-    aluInitRenderer(device, hrtf_id, hrtfreq);
+    if(device->Type != DeviceType::Loopback)
+    {
+        if(auto modeopt = device->configValue<std::string>(nullptr, "stereo-mode"))
+        {
+            const char *mode{modeopt->c_str()};
+            if(al::strcasecmp(mode, "headphones") == 0)
+                device->Flags.set(DirectEar);
+            else if(al::strcasecmp(mode, "speakers") == 0)
+                device->Flags.reset(DirectEar);
+            else if(al::strcasecmp(mode, "auto") != 0)
+                ERR("Unexpected stereo-mode: %s\n", mode);
+        }
 
-    device->NumAuxSends = new_sends;
+        if(auto encopt = device->configValue<std::string>(nullptr, "stereo-encoding"))
+        {
+            const char *mode{encopt->c_str()};
+            if(al::strcasecmp(mode, "panpot") == 0)
+                stereomode = al::make_optional(StereoEncoding::Normal);
+            else if(al::strcasecmp(mode, "uhj") == 0)
+                stereomode = al::make_optional(StereoEncoding::Uhj);
+            else if(al::strcasecmp(mode, "hrtf") == 0)
+                stereomode = al::make_optional(StereoEncoding::Hrtf);
+            else
+                ERR("Unexpected stereo-encoding: %s\n", mode);
+        }
+    }
+
+    aluInitRenderer(device, hrtf_id, stereomode);
+
     TRACE("Max sources: %d (%d + %d), effect slots: %d, sends: %d\n",
         device->SourcesMax, device->NumMonoSources, device->NumStereoSources,
         device->AuxiliaryEffectSlotMax, device->NumAuxSends);
@@ -1887,51 +1939,48 @@ ALCenum UpdateDeviceParams(ALCdevice *device, const int *attrList)
         TRACE("Dithering enabled (%d-bit, %g)\n", float2int(std::log2(device->DitherDepth)+0.5f)+1,
               device->DitherDepth);
 
-    device->LimiterState = gainLimiter;
     if(auto limopt = device->configValue<bool>(nullptr, "output-limiter"))
-        gainLimiter = *limopt ? ALC_TRUE : ALC_FALSE;
+        optlimit = limopt;
 
-    /* Valid values for gainLimiter are ALC_DONT_CARE_SOFT, ALC_TRUE, and
-     * ALC_FALSE. For ALC_DONT_CARE_SOFT, use the limiter for integer-based
-     * output (where samples must be clamped), and don't for floating-point
-     * (which can take unclamped samples).
+    /* If the gain limiter is unset, use the limiter for integer-based output
+     * (where samples must be clamped), and don't for floating-point (which can
+     * take unclamped samples).
      */
-    if(gainLimiter == ALC_DONT_CARE_SOFT)
+    if(!optlimit)
     {
         switch(device->FmtType)
         {
-            case DevFmtByte:
-            case DevFmtUByte:
-            case DevFmtShort:
-            case DevFmtUShort:
-            case DevFmtInt:
-            case DevFmtUInt:
-                gainLimiter = ALC_TRUE;
-                break;
-            case DevFmtFloat:
-                gainLimiter = ALC_FALSE;
-                break;
+        case DevFmtByte:
+        case DevFmtUByte:
+        case DevFmtShort:
+        case DevFmtUShort:
+        case DevFmtInt:
+        case DevFmtUInt:
+            optlimit = true;
+            break;
+        case DevFmtFloat:
+            break;
         }
     }
-    if(gainLimiter == ALC_FALSE)
+    if(optlimit.value_or(false) == false)
         TRACE("Output limiter disabled\n");
     else
     {
         float thrshld{1.0f};
         switch(device->FmtType)
         {
-            case DevFmtByte:
-            case DevFmtUByte:
-                thrshld = 127.0f / 128.0f;
-                break;
-            case DevFmtShort:
-            case DevFmtUShort:
-                thrshld = 32767.0f / 32768.0f;
-                break;
-            case DevFmtInt:
-            case DevFmtUInt:
-            case DevFmtFloat:
-                break;
+        case DevFmtByte:
+        case DevFmtUByte:
+            thrshld = 127.0f / 128.0f;
+            break;
+        case DevFmtShort:
+        case DevFmtUShort:
+            thrshld = 32767.0f / 32768.0f;
+            break;
+        case DevFmtInt:
+        case DevFmtUInt:
+        case DevFmtFloat:
+            break;
         }
         if(device->DitherDepth > 0.0f)
             thrshld -= 1.0f / device->DitherDepth;
@@ -2402,6 +2451,7 @@ static size_t GetIntegerv(ALCdevice *device, ALCenum param, const al::span<int> 
         return 0;
     }
 
+    std::lock_guard<std::mutex> _{device->StateLock};
     if(device->Type == DeviceType::Capture)
     {
         constexpr int MaxCaptureAttributes{9};
@@ -2416,7 +2466,6 @@ static size_t GetIntegerv(ALCdevice *device, ALCenum param, const al::span<int> 
                 alcSetError(device, ALC_INVALID_VALUE);
             else
             {
-                std::lock_guard<std::mutex> _{device->StateLock};
                 values[i++] = ALC_MAJOR_VERSION;
                 values[i++] = alcMajorVersion;
                 values[i++] = ALC_MINOR_VERSION;
@@ -2438,17 +2487,11 @@ static size_t GetIntegerv(ALCdevice *device, ALCenum param, const al::span<int> 
             return 1;
 
         case ALC_CAPTURE_SAMPLES:
-            {
-                std::lock_guard<std::mutex> _{device->StateLock};
-                values[0] = static_cast<int>(device->Backend->availableSamples());
-            }
+            values[0] = static_cast<int>(device->Backend->availableSamples());
             return 1;
 
         case ALC_CONNECTED:
-            {
-                std::lock_guard<std::mutex> _{device->StateLock};
-                values[0] = device->Connected.load(std::memory_order_acquire);
-            }
+            values[0] = device->Connected.load(std::memory_order_acquire);
             return 1;
 
         default:
@@ -2476,7 +2519,6 @@ static size_t GetIntegerv(ALCdevice *device, ALCenum param, const al::span<int> 
             alcSetError(device, ALC_INVALID_VALUE);
         else
         {
-            std::lock_guard<std::mutex> _{device->StateLock};
             values[i++] = ALC_MAJOR_VERSION;
             values[i++] = alcMajorVersion;
             values[i++] = ALC_MINOR_VERSION;
@@ -2568,10 +2610,7 @@ static size_t GetIntegerv(ALCdevice *device, ALCenum param, const al::span<int> 
             alcSetError(device, ALC_INVALID_DEVICE);
             return 0;
         }
-        {
-            std::lock_guard<std::mutex> _{device->StateLock};
-            values[0] = static_cast<int>(device->Frequency / device->UpdateSize);
-        }
+        values[0] = static_cast<int>(device->Frequency / device->UpdateSize);
         return 1;
 
     case ALC_SYNC:
@@ -2641,10 +2680,7 @@ static size_t GetIntegerv(ALCdevice *device, ALCenum param, const al::span<int> 
         return 1;
 
     case ALC_CONNECTED:
-        {
-            std::lock_guard<std::mutex> _{device->StateLock};
-            values[0] = device->Connected.load(std::memory_order_acquire);
-        }
+        values[0] = device->Connected.load(std::memory_order_acquire);
         return 1;
 
     case ALC_HRTF_SOFT:
@@ -2656,12 +2692,9 @@ static size_t GetIntegerv(ALCdevice *device, ALCenum param, const al::span<int> 
         return 1;
 
     case ALC_NUM_HRTF_SPECIFIERS_SOFT:
-        {
-            std::lock_guard<std::mutex> _{device->StateLock};
-            device->enumerateHrtfs();
-            values[0] = static_cast<int>(minz(device->mHrtfList.size(),
-                std::numeric_limits<int>::max()));
-        }
+        device->enumerateHrtfs();
+        values[0] = static_cast<int>(minz(device->mHrtfList.size(),
+            std::numeric_limits<int>::max()));
         return 1;
 
     case ALC_OUTPUT_LIMITER_SOFT:
@@ -2670,6 +2703,15 @@ static size_t GetIntegerv(ALCdevice *device, ALCenum param, const al::span<int> 
 
     case ALC_MAX_AMBISONIC_ORDER_SOFT:
         values[0] = MaxAmbiOrder;
+        return 1;
+
+    case ALC_OUTPUT_MODE_SOFT:
+        if(device->mHrtf)
+            values[0] = ALC_HRTF_SOFT;
+        else if(device->mUhjEncoder)
+            values[0] = ALC_STEREO_UHJ_SOFT;
+        else
+            values[0] = ALC_NORMAL_SOFT;
         return 1;
 
     default:
@@ -2712,6 +2754,7 @@ START_API_FUNC
             return 39;
         return 33;
     };
+    std::lock_guard<std::mutex> _{dev->StateLock};
     switch(pname)
     {
     case ALC_ATTRIBUTES_SIZE:
@@ -2723,7 +2766,6 @@ START_API_FUNC
             alcSetError(dev.get(), ALC_INVALID_VALUE);
         else
         {
-            std::lock_guard<std::mutex> _{dev->StateLock};
             size_t i{0};
             values[i++] = ALC_FREQUENCY;
             values[i++] = dev->Frequency;
@@ -2775,7 +2817,7 @@ START_API_FUNC
             values[i++] = ALC_OUTPUT_LIMITER_SOFT;
             values[i++] = dev->Limiter ? ALC_TRUE : ALC_FALSE;
 
-            ClockLatency clock{GetClockLatency(dev.get())};
+            ClockLatency clock{GetClockLatency(dev.get(), dev->Backend.get())};
             values[i++] = ALC_DEVICE_CLOCK_SOFT;
             values[i++] = clock.ClockTime.count();
 
@@ -2788,7 +2830,6 @@ START_API_FUNC
 
     case ALC_DEVICE_CLOCK_SOFT:
         {
-            std::lock_guard<std::mutex> _{dev->StateLock};
             uint samplecount, refcount;
             nanoseconds basecount;
             do {
@@ -2802,11 +2843,7 @@ START_API_FUNC
         break;
 
     case ALC_DEVICE_LATENCY_SOFT:
-        {
-            std::lock_guard<std::mutex> _{dev->StateLock};
-            ClockLatency clock{GetClockLatency(dev.get())};
-            *values = clock.Latency.count();
-        }
+        *values = GetClockLatency(dev.get(), dev->Backend.get()).Latency.count();
         break;
 
     case ALC_DEVICE_CLOCK_LATENCY_SOFT:
@@ -2814,8 +2851,7 @@ START_API_FUNC
             alcSetError(dev.get(), ALC_INVALID_VALUE);
         else
         {
-            std::lock_guard<std::mutex> _{dev->StateLock};
-            ClockLatency clock{GetClockLatency(dev.get())};
+            ClockLatency clock{GetClockLatency(dev.get(), dev->Backend.get())};
             values[0] = clock.ClockTime.count();
             values[1] = clock.Latency.count();
         }
@@ -3779,24 +3815,36 @@ START_API_FUNC
         return ALC_FALSE;
     }
     std::lock_guard<std::mutex> _{dev->StateLock};
-    auto backend = dev->Backend.get();
 
     /* Force the backend to stop mixing first since we're reopening. */
     if(dev->Flags.test(DeviceRunning))
+    {
+        auto backend = dev->Backend.get();
         backend->stop();
-    dev->Flags.reset(DeviceRunning);
+        dev->Flags.reset(DeviceRunning);
+    }
 
+    BackendPtr newbackend;
     try {
-        backend->open(deviceName);
+        newbackend = PlaybackFactory->createBackend(dev.get(), BackendType::Playback);
+        newbackend->open(deviceName);
     }
     catch(al::backend_exception &e) {
+        listlock.unlock();
+        newbackend = nullptr;
+
         WARN("Failed to reopen playback device: %s\n", e.what());
         alcSetError(dev.get(), (e.errorCode() == al::backend_error::OutOfMemory)
             ? ALC_OUT_OF_MEMORY : ALC_INVALID_VALUE);
+
+        /* If the device is connected, not paused, and has contexts, ensure it
+         * continues playing.
+         */
         if(dev->Connected.load(std::memory_order_relaxed) && !dev->Flags.test(DevicePaused)
             && !dev->mContexts.load(std::memory_order_relaxed)->empty())
         {
             try {
+                auto backend = dev->Backend.get();
                 backend->start();
                 dev->Flags.set(DeviceRunning);
             }
@@ -3808,8 +3856,21 @@ START_API_FUNC
         return ALC_FALSE;
     }
     listlock.unlock();
+    dev->Backend = std::move(newbackend);
     TRACE("Reopened device %p, \"%s\"\n", voidp{dev.get()}, dev->DeviceName.c_str());
 
-    return ResetDeviceParams(dev.get(), attribs) ? ALC_TRUE : ALC_FALSE;
+    /* Always return true even if resetting fails. It shouldn't fail, but this
+     * is primarily to avoid confusion by the app seeing the function return
+     * false while the device is on the new output anyway. We could try to
+     * restore the old backend if this fails, but the configuration would be
+     * changed with the new backend and would need to be reset again with the
+     * old one, and the provided attributes may not be appropriate or desirable
+     * for the old device.
+     *
+     * In this way, we essentially act as if the function succeeded, but
+     * immediately disconnects following it.
+     */
+    ResetDeviceParams(dev.get(), attribs);
+    return ALC_TRUE;
 }
 END_API_FUNC

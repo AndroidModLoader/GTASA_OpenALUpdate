@@ -277,8 +277,9 @@ ALeffectslot *AllocEffectSlot(ALCcontext *context)
         { return entry.FreeMask != 0; });
     auto lidx = static_cast<ALuint>(std::distance(context->mEffectSlotList.begin(), sublist));
     auto slidx = static_cast<ALuint>(al::countr_zero(sublist->FreeMask));
+    ASSUME(slidx < 64);
 
-    ALeffectslot *slot{::new(sublist->EffectSlots + slidx) ALeffectslot{}};
+    ALeffectslot *slot{al::construct_at(sublist->EffectSlots + slidx)};
     aluInitEffectPanning(&slot->mSlot, context);
 
     /* Add 1 to avoid source ID 0. */
@@ -313,7 +314,6 @@ void FreeEffectSlot(ALCcontext *context, ALeffectslot *slot)
 
 } // namespace
 
-AL_API void AL_APIENTRY alDeleteAuxiliaryEffectSlots(ALsizei n, const ALuint *effectslots);
 
 AL_API void AL_APIENTRY alGenAuxiliaryEffectSlots(ALsizei n, ALuint *effectslots)
 START_API_FUNC

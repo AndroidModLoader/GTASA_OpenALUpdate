@@ -223,7 +223,7 @@ void InitNearFieldCtrl(ALCdevice *device, float ctrl_dist, uint order, bool is3d
     std::fill(iter, std::end(device->NumChannelsPerOrder), 0u);
 }
 
-void InitDistanceComp(ALCdevice *device, DecoderView decoder,
+void InitDistanceComp(ALCdevice *device, const al::span<const Channel> channels,
     const al::span<const float,MAX_OUTPUT_CHANNELS> dists)
 {
     const float maxdist{std::accumulate(std::begin(dists), std::end(dists), 0.0f, maxf)};
@@ -235,9 +235,9 @@ void InitDistanceComp(ALCdevice *device, DecoderView decoder,
     std::vector<DistanceComp::ChanData> ChanDelay;
     ChanDelay.reserve(device->RealOut.Buffer.size());
     size_t total{0u};
-    for(size_t chidx{0};chidx < decoder.mChannels.size();++chidx)
+    for(size_t chidx{0};chidx < channels.size();++chidx)
     {
-        const Channel ch{decoder.mChannels[chidx]};
+        const Channel ch{channels[chidx]};
         const uint idx{device->RealOut.ChannelIndex[ch]};
         if(idx == INVALID_CHANNEL_INDEX)
             continue;
@@ -386,10 +386,8 @@ DecoderView MakeDecoderView(ALCdevice *device, const AmbDecConf *conf,
          * CB = Back center
          *
          * Additionally, surround51 will acknowledge back speakers for side
-         * channels, and surround51rear will acknowledge side speakers for
-         * back channels, to avoid issues with an ambdec expecting 5.1 to
-         * use the side channels when the device is configured for back,
-         * and vice-versa.
+         * channels, to avoid issues with an ambdec expecting 5.1 to use the
+         * back channels.
          */
         Channel ch{};
         if(speaker.Name == "LF")
@@ -435,6 +433,7 @@ DecoderView MakeDecoderView(ALCdevice *device, const AmbDecConf *conf,
     {
         ret.mOrder = decoder.mOrder;
         ret.mIs3D = decoder.mIs3D;
+        ret.mScaling = decoder.mScaling;
         ret.mChannels = {decoder.mChannels.data(), chan_count};
         ret.mOrderGain = decoder.mOrderGain;
         ret.mCoeffs = {decoder.mCoeffs.data(), chan_count};
@@ -606,12 +605,8 @@ void InitPanning(ALCdevice *device, const bool hqdec=false, const bool stablize=
         }
     }
 
-    /* For non-DevFmtAmbi3D, set the ambisonic order and reset the layout and
-     * scale.
-     */
+    /* For non-DevFmtAmbi3D, set the ambisonic order. */
     device->mAmbiOrder = decoder.mOrder;
-    device->mAmbiLayout = DevAmbiLayout::ACN;
-    device->mAmbiScale = DevAmbiScaling::N3D;
 
     const size_t ambicount{decoder.mIs3D ? AmbiChannelsFromOrder(decoder.mOrder) :
         Ambi2DChannelsFromOrder(decoder.mOrder)};
@@ -827,7 +822,7 @@ void InitUhjPanning(ALCdevice *device)
 
 } // namespace
 
-void aluInitRenderer(ALCdevice *device, int hrtf_id, al::optional<bool> hrtfreq)
+void aluInitRenderer(ALCdevice *device, int hrtf_id, al::optional<StereoEncoding> stereomode)
 {
     /* Hold the HRTF the device last used, in case it's used again. */
     HrtfStorePtr old_hrtf{std::move(device->mHrtf)};
@@ -842,7 +837,7 @@ void aluInitRenderer(ALCdevice *device, int hrtf_id, al::optional<bool> hrtfreq)
     if(device->FmtChans != DevFmtStereo)
     {
         old_hrtf = nullptr;
-        if(hrtfreq && hrtfreq.value())
+        if(stereomode && *stereomode == StereoEncoding::Hrtf)
             device->mHrtfStatus = ALC_HRTF_UNSUPPORTED_FORMAT_SOFT;
 
         const char *layout{nullptr};
@@ -915,7 +910,7 @@ void aluInitRenderer(ALCdevice *device, int hrtf_id, al::optional<bool> hrtfreq)
             if(spkr_count > 0)
             {
                 InitNearFieldCtrl(device, accum_dist / spkr_count, decoder.mOrder, decoder.mIs3D);
-                InitDistanceComp(device, decoder, speakerdists);
+                InitDistanceComp(device, decoder.mChannels, speakerdists);
             }
         }
         if(auto *ambidec{device->AmbiDecoder.get()})
@@ -926,25 +921,12 @@ void aluInitRenderer(ALCdevice *device, int hrtf_id, al::optional<bool> hrtfreq)
         return;
     }
 
-    bool headphones{device->IsHeadphones};
-    if(device->Type != DeviceType::Loopback)
-    {
-        if(auto modeopt = device->configValue<std::string>(nullptr, "stereo-mode"))
-        {
-            const char *mode{modeopt->c_str()};
-            if(al::strcasecmp(mode, "headphones") == 0)
-                headphones = true;
-            else if(al::strcasecmp(mode, "speakers") == 0)
-                headphones = false;
-            else if(al::strcasecmp(mode, "auto") != 0)
-                ERR("Unexpected stereo-mode: %s\n", mode);
-        }
-    }
 
-    /* If there's no request for HRTF and the device is headphones, or if HRTF
-     * is explicitly requested, try to enable it.
+    /* If there's no request for HRTF or UHJ and the device is headphones, or
+     * if HRTF is explicitly requested, try to enable it.
      */
-    if((!hrtfreq && headphones) || (hrtfreq && hrtfreq.value()))
+    if((!stereomode && device->Flags.test(DirectEar))
+        || (stereomode && *stereomode == StereoEncoding::Hrtf))
     {
         if(device->mHrtfList.empty())
             device->enumerateHrtfs();
@@ -992,6 +974,15 @@ void aluInitRenderer(ALCdevice *device, int hrtf_id, al::optional<bool> hrtfreq)
     }
     old_hrtf = nullptr;
 
+    if(stereomode && *stereomode == StereoEncoding::Uhj)
+    {
+        device->mUhjEncoder = std::make_unique<UhjEncoder>();
+        TRACE("UHJ enabled\n");
+        InitUhjPanning(device);
+        device->PostProcess = &ALCdevice::ProcessUhj;
+        return;
+    }
+
     device->mRenderMode = RenderMode::Pairwise;
     if(device->Type != DeviceType::Loopback)
     {
@@ -1008,23 +999,6 @@ void aluInitRenderer(ALCdevice *device, int hrtf_id, al::optional<bool> hrtfreq)
                 return;
             }
         }
-    }
-
-    if(auto encopt = device->configValue<std::string>(nullptr, "stereo-encoding"))
-    {
-        const char *mode{encopt->c_str()};
-        if(al::strcasecmp(mode, "uhj") == 0)
-            device->mRenderMode = RenderMode::Normal;
-        else if(al::strcasecmp(mode, "panpot") != 0)
-            ERR("Unexpected stereo-encoding: %s\n", mode);
-    }
-    if(device->mRenderMode == RenderMode::Normal)
-    {
-        device->mUhjEncoder = std::make_unique<UhjEncoder>();
-        TRACE("UHJ enabled\n");
-        InitUhjPanning(device);
-        device->PostProcess = &ALCdevice::ProcessUhj;
-        return;
     }
 
     TRACE("Stereo rendering\n");

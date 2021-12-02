@@ -313,8 +313,8 @@ void DeviceBase::ProcessUhj(const size_t SamplesToDo)
     const uint ridx{RealOut.ChannelIndex[FrontRight]};
 
     /* Encode to stereo-compatible 2-channel UHJ output. */
-    mUhjEncoder->encode(RealOut.Buffer[lidx], RealOut.Buffer[ridx], Dry.Buffer.data(),
-        SamplesToDo);
+    mUhjEncoder->encode(RealOut.Buffer[lidx].data(), RealOut.Buffer[ridx].data(),
+        Dry.Buffer.data(), SamplesToDo);
 }
 
 void DeviceBase::ProcessBs2b(const size_t SamplesToDo)
@@ -468,7 +468,8 @@ bool CalcEffectSlotParams(EffectSlot *slot, EffectSlot **sorted_slots, ContextBa
         auto evt_vec = ring->getWriteVector();
         if LIKELY(evt_vec.first.len > 0)
         {
-            AsyncEvent *evt{::new(evt_vec.first.buf) AsyncEvent{EventType_ReleaseEffectState}};
+            AsyncEvent *evt{al::construct_at(reinterpret_cast<AsyncEvent*>(evt_vec.first.buf),
+                AsyncEvent::ReleaseEffectState)};
             evt->u.mEffectState = oldstate;
             ring->writeAdvance(1);
         }
@@ -1378,14 +1379,13 @@ void CalcAttnSourceParams(Voice *voice, const VoiceProps *props, const ContextBa
             break;
 
         case DistanceModel::Disable:
-            ClampedDist = props->RefDistance;
             break;
     }
 
     /* Calculate directional soundcones */
     if(directional && props->InnerAngle < 360.0f)
     {
-        const float Angle{Rad2Deg(std::acos(Direction.dot_product(ToSource)) * ConeScale * -2.0f)};
+        const float Angle{Rad2Deg(std::acos(-Direction.dot_product(ToSource)) * ConeScale * 2.0f)};
 
         float ConeGain, ConeHF;
         if(!(Angle > props->InnerAngle))
@@ -1556,7 +1556,8 @@ void SendSourceStateEvent(ContextBase *context, uint id, VChangeState state)
     auto evt_vec = ring->getWriteVector();
     if(evt_vec.first.len < 1) return;
 
-    AsyncEvent *evt{::new(evt_vec.first.buf) AsyncEvent{EventType_SourceStateChange}};
+    AsyncEvent *evt{al::construct_at(reinterpret_cast<AsyncEvent*>(evt_vec.first.buf),
+        AsyncEvent::SourceStateChange)};
     evt->u.srcstate.id = id;
     switch(state)
     {
@@ -1667,7 +1668,7 @@ void ProcessVoiceChanges(ContextBase *ctx)
             }
             oldvoice->mPendingChange.store(false, std::memory_order_release);
         }
-        if(sendevt && (enabledevt&EventType_SourceStateChange))
+        if(sendevt && (enabledevt&AsyncEvent::SourceStateChange))
             SendSourceStateEvent(ctx, cur->mSourceID, cur->mState);
 
         next = cur->mNext.load(std::memory_order_acquire);
@@ -2018,7 +2019,7 @@ void DeviceBase::handleDisconnect(const char *msg, ...)
     if(!Connected.exchange(false, std::memory_order_acq_rel))
         return;
 
-    AsyncEvent evt{EventType_Disconnected};
+    AsyncEvent evt{AsyncEvent::Disconnected};
 
     va_list args;
     va_start(args, msg);
@@ -2032,13 +2033,13 @@ void DeviceBase::handleDisconnect(const char *msg, ...)
     for(ContextBase *ctx : *mContexts.load())
     {
         const uint enabledevt{ctx->mEnabledEvts.load(std::memory_order_acquire)};
-        if((enabledevt&EventType_Disconnected))
+        if((enabledevt&AsyncEvent::Disconnected))
         {
             RingBuffer *ring{ctx->mAsyncEvents.get()};
             auto evt_data = ring->getWriteVector().first;
             if(evt_data.len > 0)
             {
-                ::new(evt_data.buf) AsyncEvent{evt};
+                al::construct_at(reinterpret_cast<AsyncEvent*>(evt_data.buf), evt);
                 ring->writeAdvance(1);
                 ctx->mEventSem.post();
             }

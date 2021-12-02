@@ -24,7 +24,6 @@
 #include "uhjfilter.h"
 #include "vector.h"
 
-struct BackendBase;
 class BFormatDec;
 struct bs2b;
 struct Compressor;
@@ -54,6 +53,12 @@ enum class DeviceType : unsigned char {
 enum class RenderMode : unsigned char {
     Normal,
     Pairwise,
+    Hrtf
+};
+
+enum class StereoEncoding : unsigned char {
+    Normal,
+    Uhj,
     Hrtf
 };
 
@@ -121,6 +126,10 @@ enum {
     // Specifies if the device is currently running
     DeviceRunning,
 
+    // Specifies if the output plays directly on/in ears (headphones, headset,
+    // ear buds, etc).
+    DirectEar,
+
     DeviceFlagsCount
 };
 
@@ -139,7 +148,6 @@ struct DeviceBase {
 
     DevFmtChannels FmtChans{};
     DevFmtType FmtType{};
-    bool IsHeadphones{false};
     uint mAmbiOrder{0};
     float mXOverFreq{400.0f};
     /* For DevFmtAmbi* output only, specifies the channel order and
@@ -230,13 +238,6 @@ struct DeviceBase {
 
     // Contexts created on this device
     std::atomic<al::FlexArray<ContextBase*>*> mContexts{nullptr};
-
-    /* This lock protects the device state (format, update size, etc) from
-     * being from being changed in multiple threads, or being accessed while
-     * being changed. It's also used to serialize calls to the backend.
-     */
-    std::mutex StateLock;
-    std::unique_ptr<BackendBase> Backend;
 
 
     DeviceBase(DeviceType type);
