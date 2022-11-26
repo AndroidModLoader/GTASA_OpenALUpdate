@@ -5,15 +5,15 @@
 #define sizeofA(__aVar)  ((int)(sizeof(__aVar)/sizeof(__aVar[0])))
 
 #include <dlfcn.h>
-#include <AL/al.h>
-#include <AL/alc.h>
-#include <AL/alext.h>
-#include <AL/efx.h>
+#include <include/AL/al.h>
+#include <include/AL/alc.h>
+#include <include/AL/alext.h>
+#include <include/AL/efx.h>
 
 #include "isautils.h"
 ISAUtils* sautils = nullptr;
 
-MYMODCFG(net.rusjj.gtasa.openal, OpenAL Soft, 1.0.1, kcat & TheOfficialFloW & RusJJ)
+MYMODCFG(net.rusjj.gtasa.openal, OpenAL Soft, 1.1, kcat & TheOfficialFloW & RusJJ)
 
 void* pGTASA = nullptr;
 uintptr_t pGTASAAddr = 0;
