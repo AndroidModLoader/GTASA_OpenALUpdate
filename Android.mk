@@ -5,11 +5,11 @@ LOCAL_CPP_EXTENSION := .cpp .cc
 LOCAL_MODULE    := OpenALUpdate
 
 # Google Oboe
-FILE_LIST := $(wildcard $(LOCAL_PATH)/oboe/aaudio/*.cpp)
-FILE_LIST += $(wildcard $(LOCAL_PATH)/oboe/common/*.cpp)
-FILE_LIST += $(wildcard $(LOCAL_PATH)/oboe/fifo/*.cpp)
-FILE_LIST += $(wildcard $(LOCAL_PATH)/oboe/flowgraph/*.cpp) $(wildcard $(LOCAL_PATH)/oboe/flowgraph/resampler/*.cpp)
-FILE_LIST += $(wildcard $(LOCAL_PATH)/oboe/opensles/*.cpp)
+FILE_LIST := $(wildcard $(LOCAL_PATH)/oboe/src/aaudio/*.cpp)
+FILE_LIST += $(wildcard $(LOCAL_PATH)/oboe/src/common/*.cpp)
+FILE_LIST += $(wildcard $(LOCAL_PATH)/oboe/src/fifo/*.cpp)
+FILE_LIST += $(wildcard $(LOCAL_PATH)/oboe/src/flowgraph/*.cpp) $(wildcard $(LOCAL_PATH)/oboe/flowgraph/resampler/*.cpp)
+FILE_LIST += $(wildcard $(LOCAL_PATH)/oboe/src/opensles/*.cpp)
 
 # kcat's OpenAL Soft
 FILE_LIST += $(wildcard $(LOCAL_PATH)/al/*.cpp)
