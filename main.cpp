@@ -54,13 +54,13 @@ ALCcontext *alcCreateContextHook(ALCdevice* device, const ALCint* attributes)
     pDeviceContext = alcCreateContext(device, attr);
     return pDeviceContext;
 }
-void AudioFrequencyToggled(int oldVal, int newVal)
+void AudioFrequencyToggled(int oldVal, int newVal, void* data)
 {
     pCfg44100Frequency->SetInt(newVal);
     UpdateALDevice();
     cfg->Save();
 }
-void HRTFToggled(int oldVal, int newVal)
+void HRTFToggled(int oldVal, int newVal, void* data)
 {
     pCfgHRTF->SetInt(newVal);
     UpdateALDevice();
@@ -267,7 +267,7 @@ extern "C" void OnModLoad()
     sautils = (ISAUtils*)GetInterface("SAUtils");
     if(sautils != nullptr)
     {
-        sautils->AddClickableItem(Audio, "Max Audio Frequency", pCfg44100Frequency->GetBool(), 0, sizeofA(pFreq)-1, pFreq, AudioFrequencyToggled);
-        sautils->AddClickableItem(Audio, "HRTF", pCfgHRTF->GetBool(), 0, sizeofA(pYesNo)-1, pYesNo, HRTFToggled);
+        sautils->AddClickableItem(SetType_Audio, "Max Audio Frequency", pCfg44100Frequency->GetBool(), 0, sizeofA(pFreq)-1, pFreq, AudioFrequencyToggled, NULL);
+        sautils->AddClickableItem(SetType_Audio, "HRTF", pCfgHRTF->GetBool(), 0, sizeofA(pYesNo)-1, pYesNo, HRTFToggled, NULL);
     }
 }

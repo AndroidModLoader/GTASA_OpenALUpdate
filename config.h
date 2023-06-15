@@ -1,5 +1,7 @@
+#define FORCE_ALIGN
+
 #define HAVE_POSIX_MEMALIGN
-#define HAVE_OPENSL
+#define HAVE_OBOE
 #define HAVE_DLFCN_H
 #define HAVE_MALLOC_H
 #define HAVE_PTHREAD_SETSCHEDPARAM
