@@ -40,7 +40,7 @@ jobs:
 
       with:
 
-        ndk-version: r21
+        ndk-version: r24
 
         local-cache: true
 
