@@ -12,7 +12,7 @@
 #include "isautils.h"
 ISAUtils* sautils = NULL;
 
-MYMODCFG(net.rusjj.gtasa.openal, OpenAL Soft, 1.2, kcat & TheOfficialFloW & RusJJ)
+MYMODCFG(net.rusjj.gtasa.openal, OpenAL Soft, 1.2.1, kcat & TheOfficialFloW & RusJJ)
 
 #define BUILD_ATTR() const ALCint attr[] = { \
         ALC_FREQUENCY, pCfg44100Frequency->GetBool() ? 44100 : 22050, \
@@ -251,13 +251,13 @@ extern "C" void OnModLoad()
 
     // Hooks. Obviously.
     HOOK(PauseOpenAL, aml->GetSym(hGTASA, "_ZN16CAEAudioHardware11PauseOpenALEi"));
-    HOOKPLT(InitOpenALListener, pGTASAAddr + 0x6752B0); // aml->GetSym(hGTASA, "_ZN16CAEAudioHardware18InitOpenALListenerEv")
+    //HOOKPLT(InitOpenALListener, pGTASAAddr + 0x6752B0); // aml->GetSym(hGTASA, "_ZN16CAEAudioHardware18InitOpenALListenerEv")
 
     sautils = (ISAUtils*)GetInterface("SAUtils");
     if(sautils != NULL)
     {
-        sautils->AddClickableItem(SetType_Audio, "Max Audio Frequency", pCfg44100Frequency->GetBool(), 0, sizeofA(pFreq)-1, pFreq, AudioFrequencyToggled, NULL);
-        sautils->AddClickableItem(SetType_Audio, "HRTF", pCfgHRTF->GetBool(), 0, sizeofA(pYesNo)-1, pYesNo, HRTFToggled, NULL);
-        sautils->AddClickableItem(SetType_Audio, "Dont pause sounds", pCfgDontPauseSounds->GetBool(), 0, sizeofA(pYesNo)-1, pYesNo, SoundsPauseToggled, NULL);
+        sautils->AddClickableItem(SetType_Audio, "Max Audio Frequency", pCfg44100Frequency->GetBool(), 0, sizeofA(pFreq)-1, pFreq, AudioFrequencyToggled);
+        sautils->AddClickableItem(SetType_Audio, "HRTF", pCfgHRTF->GetBool(), 0, sizeofA(pYesNo)-1, pYesNo, HRTFToggled);
+        sautils->AddClickableItem(SetType_Audio, "Dont pause sounds", pCfgDontPauseSounds->GetBool(), 0, sizeofA(pYesNo)-1, pYesNo, SoundsPauseToggled);
     }
 }
