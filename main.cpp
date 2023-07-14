@@ -54,19 +54,19 @@ ALCcontext *alcCreateContextHook(ALCdevice* device, const ALCint* attributes)
 }
 void AudioFrequencyToggled(int oldVal, int newVal, void* data)
 {
-    pCfg44100Frequency->SetInt(newVal);
+    pCfg44100Frequency->SetBool(newVal != 0);
     UpdateALDevice();
     cfg->Save();
 }
 void HRTFToggled(int oldVal, int newVal, void* data)
 {
-    pCfgHRTF->SetInt(newVal);
+    pCfgHRTF->SetBool(newVal != 0);
     UpdateALDevice();
     cfg->Save();
 }
 void SoundsPauseToggled(int oldVal, int newVal, void* data)
 {
-    pCfgDontPauseSounds->SetInt(newVal);
+    pCfgDontPauseSounds->SetBool(newVal != 0);
     cfg->Save();
 }
 
@@ -256,8 +256,8 @@ extern "C" void OnModLoad()
     sautils = (ISAUtils*)GetInterface("SAUtils");
     if(sautils != NULL)
     {
-        sautils->AddClickableItem(SetType_Audio, "Max Audio Frequency", pCfg44100Frequency->GetBool(), 0, sizeofA(pFreq)-1, pFreq, AudioFrequencyToggled);
-        sautils->AddClickableItem(SetType_Audio, "HRTF", pCfgHRTF->GetBool(), 0, sizeofA(pYesNo)-1, pYesNo, HRTFToggled);
-        sautils->AddClickableItem(SetType_Audio, "Dont pause sounds", pCfgDontPauseSounds->GetBool(), 0, sizeofA(pYesNo)-1, pYesNo, SoundsPauseToggled);
+        sautils->AddClickableItem(SetType_Audio, "Max Audio Frequency", pCfg44100Frequency->GetInt(), 0, sizeofA(pFreq)-1, pFreq, AudioFrequencyToggled);
+        sautils->AddClickableItem(SetType_Audio, "HRTF", pCfgHRTF->GetInt(), 0, sizeofA(pYesNo)-1, pYesNo, HRTFToggled);
+        sautils->AddClickableItem(SetType_Audio, "Dont pause sounds", pCfgDontPauseSounds->GetInt(), 0, sizeofA(pYesNo)-1, pYesNo, SoundsPauseToggled);
     }
 }
