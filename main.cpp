@@ -12,7 +12,7 @@
 #include "isautils.h"
 ISAUtils* sautils = NULL;
 
-MYMODCFG(net.rusjj.gtasa.openal, OpenAL Soft, 1.2.1, kcat & TheOfficialFloW & RusJJ)
+MYMODCFG(net.rusjj.gtasa.openal, OpenAL Soft, 1.2.2, kcat & TheOfficialFloW & RusJJ)
 
 #define BUILD_ATTR() const ALCint attr[] = { \
         ALC_FREQUENCY, pCfg44100Frequency->GetBool() ? 44100 : 22050, \
@@ -50,6 +50,9 @@ ALCcontext *alcCreateContextHook(ALCdevice* device, const ALCint* attributes)
     pSoundDevice = device;
     BUILD_ATTR();
     pDeviceContext = alcCreateContext(device, attr);
+
+    UpdateALDevice();
+
     return pDeviceContext;
 }
 void AudioFrequencyToggled(int oldVal, int newVal, void* data)
@@ -77,6 +80,7 @@ DECL_HOOKv(PauseOpenAL, uintptr_t self, int doPause)
     bPaused = (doPause != 0);
     if(!pSoundDevice || pCfgDontPauseSounds->GetBool()) return;
     doPause ? alcDevicePauseSOFT(pSoundDevice) : alcDeviceResumeSOFT(pSoundDevice);
+    UpdateALDevice();
 }
 DECL_HOOKv(InitOpenALListener, void* self)
 {

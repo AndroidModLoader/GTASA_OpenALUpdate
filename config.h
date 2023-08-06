@@ -8,3 +8,5 @@
 #define HAVE_PTHREAD_SETNAME_NP
 #define HAVE_NEON
 #define HAVE_GETOPT
+
+#define ALSOFT_EMBED_HRTF_DATA
